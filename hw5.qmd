@@ -88,7 +88,7 @@ df <- read_csv(path) %>%
   rename_with(tolower) %>%
   drop_na()
 
-
+df$ocean_proximity <- as.factor(df$ocean_proximity)
 print(df) # Insert your code here
 ```
 
@@ -220,6 +220,7 @@ print(svm_rmse)
 ```
 
 
+
 ---
 
 ###### 1.8 (25 points)
@@ -227,24 +228,21 @@ print(svm_rmse)
 Initialize a neural network model architecture:
 
 ```{R}
-NNet <- nn_module(
-  "NNet",
-  initialize = function(num_features) {
-    self$layer1 <- nn_linear(num_features, 32)
-    self$layer2 <- nn_linear(32, 16)
-    self$layer3 <- nn_linear(16, 8)
-    self$output <- nn_linear(8, 1) # Single output node for binary classification
+nn_module <- nn_module(
+  initialize = function(p,q1,q2,q3) {
+    self$hidden1 <- nn_linear(p, q1)
+    self$hidden2 <- nn_linear(q1, q2)
+    self$hidden3 <- nn_linear(q2, q3)
+    self$output <- nn_linear(q3, 1) # Single output node for binary classification
+    self$activation <- nn_relu()
+    self$sigmoid <- nn_sigmoid()
   },
   forward = function(x) {
     x %>%
-      self$layer1() %>%
-      nnf_relu() %>%
-      self$layer2() %>%
-      nnf_relu() %>%
-      self$layer3() %>%
-      nnf_relu() %>%
-      self$output() %>%
-      torch_sigmoid() # Sigmoid activation function for binary classification
+      self$hidden1() %>% self$activation() %>%
+      self$layer2() %>% self$activation() %>%
+      self$layer3() %>% self$activation() %>%
+      self$output() %>% self$sigmoid() # Sigmoid activation function for binary classification
   }
 )
 
@@ -254,22 +252,36 @@ NNet <- nn_module(
 
 Fit a neural network model to predict the `median_house_value` using the same predictors as in 1.4. Use the `model.matrix` function to create the covariate matrix and `luz` package for fitting the network with $32, 16, 8$ nodes in each of the three hidden layers. 
 
-```{R}
-covariates <- model.matrix(~ . - median_house_value, data = df_train)
-target <- df_train$median_house_value
 
-# Convert data to tensors
-data_tensor <- torch_tensor(covariates)
-target_tensor <- torch_tensor(target)
+```{R}
+test_ind <- sample(1:nrow(df),23,replace = FALSE)
+```
+
+```{R}
+M <- model.matrix(median_house_value ~ 0 + . , data = df_train)
 ```
 
 
-```{R}
-dataset <- tensor_dataset(list(x = data_tensor, y = target_tensor))
 
-# Create a dataloader
-dataloader <- dataloader(dataset, batch_size = 32, shuffle = TRUE)
+
+```{R}
+fit_nn <- nn_module %>%
+  setup(loss = nn_bce_loss(), 
+        optimizer = optim_adam,
+        metrics = list(luz_metric_accuracy())) %>%
+  set_hparams(p = ncol(M),p1 = 32, p2 = 16, p3 = 8) %>%
+  set_opt_hparams(lr= 0.001) %>%
+  fit(data=list(
+      model.matrix(median_house_value ~ 0 + .,data = df_train),df_train %>% select(median_house_value) %>% as.matrix),
+      valid_data = list(
+      model.matrix(median_house_value ~ 0 + .,data = df_test),df_test %>% select(median_house_value) %>% as.matrix),
+      epochs = 100,
+      verbose = TRUE
+      )
 ```
+
+
+
 
 
 ```{R}
@@ -752,6 +764,28 @@ For the next questions, you will need to fit a series of neural networks. In all
 You can use any optimizer of your choice, but you **will need to tune the learning rate for each problem**.
 :::
 
+```{R, message=FALSE, warning=FALSE, results='hide'}
+packages <- c(
+  "tibble",
+  "dplyr", 
+  "readr", 
+  "tidyr", 
+  "purrr", 
+  "broom",
+  "magrittr",
+  "corrplot",
+  "caret",
+  "rpart",
+  "rpart.plot",
+  "e1071",
+  "torch", 
+  "luz"
+)
+
+# renv::install(packages)
+sapply(packages, require, character.only=T)
+```
+
 
 ###### 3.4 (10 points)
 
@@ -762,9 +796,9 @@ library(torch)
 library(luz)
 
 NN1 <- nn_module(
-  initialize = function() {
-    self$hidden1 <- nn_linear(2, 10)
-    self$output <- nn_linear(10, 3)
+  initialize = function(p,q1,q2) {
+    self$hidden1 <- nn_linear(p, q1)
+    self$output <- nn_linear(q1, q2)
     self$activation <- nn_relu()
   },
   forward = function(x) {
@@ -775,8 +809,7 @@ NN1 <- nn_module(
   }
 )
 
-# Correctly instantiate the NN1 module
-NN1_instance <- NN1$new()
+
 
 
 
@@ -794,6 +827,21 @@ dataloader <- dataloader(dataset, batch_size = 64, shuffle = TRUE)
 
 
 
+fit_1 <- NN1 %>%
+  setup(
+    loss = nn_bce_loss(),
+    optimizer = optim_adam) %>%
+  set_hparams(p=2,q1= 10,q2 =3) %>%
+  set_opt_hparams(lr =0.01) %>%
+  fit(data = list(as.matrix(df[,-1]),
+                  as.matrix(df[,1])-1),
+      epochs = 50,
+    verbose = TRUE)
+
+    
+```
+
+```{R}
 fit_1 <- NN1_instance %>%
   setup(
     loss = nn_cross_entropy_loss(),
@@ -805,6 +853,7 @@ fit_1 <- NN1_instance %>%
     verbose = TRUE
   )
 ```
+
 
 ```{R}
 library(torch)
